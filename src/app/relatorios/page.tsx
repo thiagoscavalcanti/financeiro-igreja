@@ -105,12 +105,14 @@ function downloadBlob(filename: string, mime: string, content: string) {
 
 function toCSV(rows: Array<Record<string, any>>) {
   const BOM = "\ufeff";
-  const cols = Array.from(
-    rows.reduce((set, r) => {
-      Object.keys(r).forEach((k) => set.add(k));
-      return set;
-    }, new Set<string>())
-  );
+
+  // ✅ Correção TS: evitar Array.from em algo que o TS pode inferir como Record.
+  // Monta colunas via Set explícito.
+  const colSet = new Set<string>();
+  for (const r of rows) {
+    for (const k of Object.keys(r)) colSet.add(k);
+  }
+  const cols = Array.from(colSet);
 
   const esc = (v: any) => {
     if (v === null || v === undefined) return "";
@@ -515,7 +517,7 @@ export default function RelatoriosPage() {
     downloadBlob(fname, "application/vnd.ms-excel;charset=utf-8", html);
   }
 
-  // ✅ (6) PDF com layout “relatório” (cabeçalho/rodapé/totais/assinatura)
+  // ✅ PDF com layout “relatório” (cabeçalho/rodapé/totais/assinatura)
   function exportConsolidatedPDF() {
     const rows = consolidated
       .map(
@@ -673,7 +675,7 @@ export default function RelatoriosPage() {
     downloadBlob(fname, "application/vnd.ms-excel;charset=utf-8", html);
   }
 
-  // ✅ (6) PDF com layout “relatório” + totais e assinatura
+  // ✅ PDF com layout “relatório” + totais e assinatura
   function exportTxPDF() {
     const rows = txTable
       .map((t) => {
@@ -847,17 +849,20 @@ export default function RelatoriosPage() {
                 </Select>
               </div>
 
-              {/* ✅ (1) Status */}
+              {/* ✅ Status */}
               <div className="lg:col-span-2">
                 <label className="text-sm">Status (saídas)</label>
-                <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
+                <Select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+                >
                   <option value="all">Todos</option>
                   <option value="executed">Executadas</option>
                   <option value="scheduled">Programadas</option>
                 </Select>
               </div>
 
-              {/* ✅ (2) Forma */}
+              {/* ✅ Forma */}
               <div className="lg:col-span-1">
                 <label className="text-sm">Forma</label>
                 <Input
@@ -1021,9 +1026,7 @@ export default function RelatoriosPage() {
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
               <div className="font-semibold">Lançamentos (detalhe)</div>
-              <div className={`text-xs ${ui.muted} mt-1`}>
-                Mesmos filtros aplicados • ideal para contabilidade.
-              </div>
+              <div className={`text-xs ${ui.muted} mt-1`}>Mesmos filtros aplicados • ideal para contabilidade.</div>
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
