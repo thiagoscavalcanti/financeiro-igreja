@@ -7,6 +7,7 @@ import AppShell from "@/components/AppShell";
 import { supabase } from "@/lib/supabaseClient";
 import type { Transaction } from "@/lib/types";
 import { useIsAdmin } from "@/lib/useIsAdmin";
+import { todayLocalISO } from "@/lib/dates";
 
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
@@ -25,24 +26,34 @@ function toMonthStr(d = new Date()) {
   return `${y}-${m}`;
 }
 
+// ✅ helper: Date -> YYYY-MM-DD usando horário LOCAL
+function toLocalISODate(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function monthRange(month: string) {
   const [y, m] = month.split("-").map(Number);
   const start = new Date(y, m - 1, 1);
   const end = new Date(y, m, 1);
   return {
-    startStr: start.toISOString().slice(0, 10),
-    endStr: end.toISOString().slice(0, 10),
+    startStr: toLocalISODate(start),
+    endStr: toLocalISODate(end),
   };
 }
 
+// ✅ hoje no fuso local (Brasil), sem UTC
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return todayLocalISO();
 }
 
+// ✅ soma dias preservando data LOCAL (sem toISOString)
 function addDaysISO(iso: string, days: number) {
   const d = new Date(iso + "T00:00:00");
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return toLocalISODate(d);
 }
 
 function monthFromISO(iso: string) {
@@ -165,7 +176,6 @@ export default function LancamentosPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("today");
   const [month, setMonth] = useState(toMonthStr());
 
-  // Range (draft vs applied) — UX: só aplica quando clicar "Aplicar"
   const [rangeStartDraft, setRangeStartDraft] = useState(() =>
     addDaysISO(todayStr(), -4)
   );
@@ -206,7 +216,6 @@ export default function LancamentosPage() {
       const endIncl = addDaysISO(r.endStr, -1);
       return `${fmtDateBR(r.startStr)} → ${fmtDateBR(endIncl)}`;
     }
-    // range
     const s = rangeStart <= rangeEnd ? rangeStart : rangeEnd;
     const e = rangeStart <= rangeEnd ? rangeEnd : rangeStart;
     return `${fmtDateBR(s)} → ${fmtDateBR(e)}`;
@@ -395,10 +404,7 @@ export default function LancamentosPage() {
   }, [txs, carryIn]);
 
   const dailyTotals = useMemo(() => {
-    const totals: Record<
-      string,
-      { inc: number; exp: number; prog: number; bal: number }
-    > = {};
+    const totals: Record<string, { inc: number; exp: number; prog: number; bal: number }> = {};
     let running = carryIn;
 
     for (const d of dates) {
@@ -474,7 +480,6 @@ export default function LancamentosPage() {
   }
 
   function applyRange() {
-    // normaliza caso invertido
     const s = rangeStartDraft || todayStr();
     const e = rangeEndDraft || s;
     const start = s <= e ? s : e;
@@ -732,7 +737,7 @@ export default function LancamentosPage() {
           <div className={`mt-6 text-sm ${ui.muted}`}>
             Carregando lançamentos…
           </div>
-        ) : dates.length === 0 ? (
+        ) : txs.length === 0 ? (
           <div className={`mt-6 text-sm ${ui.muted}`}>
             Nenhum lançamento no período.
           </div>
@@ -783,141 +788,38 @@ export default function LancamentosPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-0 md:gap-4 p-4">
-                    {/* ENTRADAS */}
-                    <div className={`md:border-r ${ui.separator} md:pr-4`}>
-                      <div className="font-semibold mb-2">Entradas</div>
+                  {/* ... resto do seu render (entradas/saídas) permanece igual ... */}
+                  <div className="p-4">
+                    {/* Mantive seu conteúdo original abaixo sem mudanças de lógica */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-0 md:gap-4">
+                      {/* ENTRADAS */}
+                      <div className={`md:border-r ${ui.separator} md:pr-4`}>
+                        <div className="font-semibold mb-2">Entradas</div>
 
-                      {incomes.length === 0 ? (
-                        <div className={`text-sm ${ui.muted}`}>Sem entradas.</div>
-                      ) : (
-                        <div className="space-y-2">
-                          {incomes.map((t) => (
-                            <Card key={t.id} variant="soft" className="p-3">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="text-sm font-medium truncate">
-                                    {t.description}
-                                  </div>
-                                  <div className={`text-xs ${ui.muted} mt-1`}>
-                                    {t.categories?.name ?? "—"} •{" "}
-                                    {t.accounts?.name ?? "—"}
-                                    {t.payment_method ? ` • ${t.payment_method}` : ""}
-                                  </div>
-
-                                  {isAdmin && (
-                                    <div className="mt-3 flex gap-2 flex-wrap">
-                                      <a href={`/lancamentos/${t.id}/editar`}>
-                                        <Button size="sm" variant="ghost" type="button">
-                                          Editar
-                                        </Button>
-                                      </a>
-                                      <Button
-                                        size="sm"
-                                        variant="danger"
-                                        onClick={() => handleDelete(t.id)}
-                                        type="button"
-                                      >
-                                        Excluir
-                                      </Button>
-                                    </div>
-                                  )}
-                                </div>
-
-                                <div className="text-sm font-semibold whitespace-nowrap">
-                                  {fmtBRL(Number(t.amount))}
-                                </div>
-                              </div>
-                            </Card>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* SAÍDAS */}
-                    <div className="md:pl-4 mt-4 md:mt-0">
-                      <div className="font-semibold mb-2">Saídas</div>
-
-                      {expenses.length === 0 ? (
-                        <div className={`text-sm ${ui.muted}`}>Sem saídas.</div>
-                      ) : (
-                        <div className="space-y-2">
-                          {expenses.map((t) => {
-                            const atts = t.attachments ?? [];
-                            const scheduled = isScheduledExpense(t);
-
-                            return (
+                        {incomes.length === 0 ? (
+                          <div className={`text-sm ${ui.muted}`}>Sem entradas.</div>
+                        ) : (
+                          <div className="space-y-2">
+                            {incomes.map((t) => (
                               <Card key={t.id} variant="soft" className="p-3">
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="min-w-0">
                                     <div className="text-sm font-medium truncate">
                                       {t.description}
                                     </div>
-
-                                    <div
-                                      className={[
-                                        "text-xs mt-1 flex flex-wrap items-center gap-2",
-                                        ui.muted,
-                                      ].join(" ")}
-                                    >
-                                      <span>
-                                        {t.categories?.name ?? "—"} •{" "}
-                                        {t.accounts?.name ?? "—"}
-                                        {t.payment_method ? ` • ${t.payment_method}` : ""}
-                                      </span>
-
-                                      {scheduled ? (
-                                        <Pill variant="warn">PROGRAMADA</Pill>
-                                      ) : (
-                                        <Pill variant="success">EXECUTADA</Pill>
-                                      )}
+                                    <div className={`text-xs ${ui.muted} mt-1`}>
+                                      {t.categories?.name ?? "—"} •{" "}
+                                      {t.accounts?.name ?? "—"}
+                                      {t.payment_method ? ` • ${t.payment_method}` : ""}
                                     </div>
 
-                                    {atts.length > 0 && (
-                                      <div className="mt-3 flex flex-wrap gap-2">
-                                        {atts.map((a) => {
-                                          if (a.external_url) {
-                                            return (
-                                              <a
-                                                key={a.id}
-                                                href={a.external_url}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                              >
-                                                <Button size="sm" variant="ghost" type="button">
-                                                  {a.original_name}
-                                                </Button>
-                                              </a>
-                                            );
-                                          }
-                                          if (a.storage_path) {
-                                            return (
-                                              <Button
-                                                key={a.id}
-                                                size="sm"
-                                                variant="ghost"
-                                                onClick={() =>
-                                                  openAttachment(a.storage_path!)
-                                                }
-                                                type="button"
-                                              >
-                                                Ver: {a.original_name}
-                                              </Button>
-                                            );
-                                          }
-                                          return null;
-                                        })}
-                                      </div>
-                                    )}
-
                                     {isAdmin && (
-                                      <div className="mt-3 flex flex-wrap gap-2">
+                                      <div className="mt-3 flex gap-2 flex-wrap">
                                         <a href={`/lancamentos/${t.id}/editar`}>
                                           <Button size="sm" variant="ghost" type="button">
                                             Editar
                                           </Button>
                                         </a>
-
                                         <Button
                                           size="sm"
                                           variant="danger"
@@ -926,17 +828,6 @@ export default function LancamentosPage() {
                                         >
                                           Excluir
                                         </Button>
-
-                                        {scheduled && (
-                                          <Button
-                                            size="sm"
-                                            variant="primary"
-                                            onClick={() => markExecuted(t)}
-                                            type="button"
-                                          >
-                                            Marcar como executada
-                                          </Button>
-                                        )}
                                       </div>
                                     )}
                                   </div>
@@ -946,10 +837,126 @@ export default function LancamentosPage() {
                                   </div>
                                 </div>
                               </Card>
-                            );
-                          })}
-                        </div>
-                      )}
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* SAÍDAS */}
+                      <div className="md:pl-4 mt-4 md:mt-0">
+                        <div className="font-semibold mb-2">Saídas</div>
+
+                        {expenses.length === 0 ? (
+                          <div className={`text-sm ${ui.muted}`}>Sem saídas.</div>
+                        ) : (
+                          <div className="space-y-2">
+                            {expenses.map((t) => {
+                              const atts = t.attachments ?? [];
+                              const scheduled = isScheduledExpense(t);
+
+                              return (
+                                <Card key={t.id} variant="soft" className="p-3">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div className="text-sm font-medium truncate">
+                                        {t.description}
+                                      </div>
+
+                                      <div
+                                        className={[
+                                          "text-xs mt-1 flex flex-wrap items-center gap-2",
+                                          ui.muted,
+                                        ].join(" ")}
+                                      >
+                                        <span>
+                                          {t.categories?.name ?? "—"} •{" "}
+                                          {t.accounts?.name ?? "—"}
+                                          {t.payment_method ? ` • ${t.payment_method}` : ""}
+                                        </span>
+
+                                        {scheduled ? (
+                                          <Pill variant="warn">PROGRAMADA</Pill>
+                                        ) : (
+                                          <Pill variant="success">EXECUTADA</Pill>
+                                        )}
+                                      </div>
+
+                                      {atts.length > 0 && (
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                          {atts.map((a) => {
+                                            if (a.external_url) {
+                                              return (
+                                                <a
+                                                  key={a.id}
+                                                  href={a.external_url}
+                                                  target="_blank"
+                                                  rel="noreferrer"
+                                                >
+                                                  <Button size="sm" variant="ghost" type="button">
+                                                    {a.original_name}
+                                                  </Button>
+                                                </a>
+                                              );
+                                            }
+                                            if (a.storage_path) {
+                                              return (
+                                                <Button
+                                                  key={a.id}
+                                                  size="sm"
+                                                  variant="ghost"
+                                                  onClick={() => openAttachment(a.storage_path!)}
+                                                  type="button"
+                                                >
+                                                  Ver: {a.original_name}
+                                                </Button>
+                                              );
+                                            }
+                                            return null;
+                                          })}
+                                        </div>
+                                      )}
+
+                                      {isAdmin && (
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                          <a href={`/lancamentos/${t.id}/editar`}>
+                                            <Button size="sm" variant="ghost" type="button">
+                                              Editar
+                                            </Button>
+                                          </a>
+
+                                          <Button
+                                            size="sm"
+                                            variant="danger"
+                                            onClick={() => handleDelete(t.id)}
+                                            type="button"
+                                          >
+                                            Excluir
+                                          </Button>
+
+                                          {scheduled && (
+                                            <Button
+                                              size="sm"
+                                              variant="primary"
+                                              onClick={() => markExecuted(t)}
+                                              type="button"
+                                            >
+                                              Marcar como executada
+                                            </Button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    <div className="text-sm font-semibold whitespace-nowrap">
+                                      {fmtBRL(Number(t.amount))}
+                                    </div>
+                                  </div>
+                                </Card>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </Card>

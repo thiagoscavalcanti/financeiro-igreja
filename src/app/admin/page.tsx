@@ -29,9 +29,7 @@ type Profile = {
 export default function AdminPage() {
   const { isAdmin, loading: loadingRole } = useIsAdmin();
 
-  const [tab, setTab] = useState<"accounts" | "categories" | "users">(
-    "accounts"
-  );
+  const [tab, setTab] = useState<"accounts" | "categories" | "users">("accounts");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -43,20 +41,19 @@ export default function AdminPage() {
   const [newCatName, setNewCatName] = useState("");
   const [newCatKind, setNewCatKind] = useState<"income" | "expense">("income");
 
+  // ✅ Novo: criar usuário
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPass, setNewUserPass] = useState("");
+  const [newUserName, setNewUserName] = useState("");
+  const [newUserRole, setNewUserRole] = useState<"viewer" | "admin">("viewer");
+
   async function loadAll() {
     setMsg(null);
 
     const [acc, cat, prof] = await Promise.all([
       supabase.from("accounts").select("id,name,active").order("name"),
-      supabase
-        .from("categories")
-        .select("id,name,kind,active")
-        .order("kind")
-        .order("name"),
-      supabase
-        .from("profiles")
-        .select("user_id,full_name,role,created_at")
-        .order("created_at", { ascending: false }),
+      supabase.from("categories").select("id,name,kind,active").order("kind").order("name"),
+      supabase.from("profiles").select("user_id,full_name,role,created_at").order("created_at", { ascending: false }),
     ]);
 
     if (acc.error) setMsg(acc.error.message);
@@ -80,9 +77,7 @@ export default function AdminPage() {
     if (!newAccount.trim()) return;
     setBusy(true);
 
-    const { error } = await supabase
-      .from("accounts")
-      .insert({ name: newAccount.trim() });
+    const { error } = await supabase.from("accounts").insert({ name: newAccount.trim() });
 
     setBusy(false);
     if (error) return setMsg(error.message);
@@ -93,10 +88,7 @@ export default function AdminPage() {
   async function toggleAccount(a: Account) {
     setMsg(null);
     setBusy(true);
-    const { error } = await supabase
-      .from("accounts")
-      .update({ active: !a.active })
-      .eq("id", a.id);
+    const { error } = await supabase.from("accounts").update({ active: !a.active }).eq("id", a.id);
     setBusy(false);
     if (error) return setMsg(error.message);
     loadAll();
@@ -105,9 +97,7 @@ export default function AdminPage() {
   async function deleteAccount(a: Account) {
     setMsg(null);
 
-    const ok = confirm(
-      `Excluir a conta "${a.name}"? Isso não poderá ser desfeito.`
-    );
+    const ok = confirm(`Excluir a conta "${a.name}"? Isso não poderá ser desfeito.`);
     if (!ok) return;
 
     setBusy(true);
@@ -144,10 +134,7 @@ export default function AdminPage() {
   async function toggleCategory(c: Category) {
     setMsg(null);
     setBusy(true);
-    const { error } = await supabase
-      .from("categories")
-      .update({ active: !c.active })
-      .eq("id", c.id);
+    const { error } = await supabase.from("categories").update({ active: !c.active }).eq("id", c.id);
     setBusy(false);
     if (error) return setMsg(error.message);
     loadAll();
@@ -157,9 +144,7 @@ export default function AdminPage() {
     setMsg(null);
 
     const ok = confirm(
-      `Excluir a categoria "${c.name}" (${
-        c.kind === "income" ? "Entrada" : "Saída"
-      })? Isso não poderá ser desfeito.`
+      `Excluir a categoria "${c.name}" (${c.kind === "income" ? "Entrada" : "Saída"})? Isso não poderá ser desfeito.`
     );
     if (!ok) return;
 
@@ -181,23 +166,66 @@ export default function AdminPage() {
   async function setUserRole(p: Profile, role: "admin" | "viewer") {
     setMsg(null);
     setBusy(true);
-    const { error } = await supabase
-      .from("profiles")
-      .update({ role })
-      .eq("user_id", p.user_id);
+    const { error } = await supabase.from("profiles").update({ role }).eq("user_id", p.user_id);
     setBusy(false);
     if (error) return setMsg(error.message);
     loadAll();
   }
 
-  const catsIncome = useMemo(
-    () => categories.filter((c) => c.kind === "income"),
-    [categories]
-  );
-  const catsExpense = useMemo(
-    () => categories.filter((c) => c.kind === "expense"),
-    [categories]
-  );
+  // ✅ Criar usuário (Auth + profiles) via API segura
+  async function createUser() {
+    setMsg(null);
+
+    const email = newUserEmail.trim().toLowerCase();
+    const password = newUserPass.trim();
+    const full_name = newUserName.trim();
+
+    if (!email) return setMsg("Informe o e-mail do novo usuário.");
+    if (!password || password.length < 6) return setMsg("Senha deve ter pelo menos 6 caracteres.");
+
+    setBusy(true);
+
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess.session?.access_token;
+
+    if (!token) {
+      setBusy(false);
+      setMsg("Sessão expirada. Faça login novamente.");
+      return;
+    }
+
+    const res = await fetch("/api/admin/create-user", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        email,
+        password,
+        full_name: full_name || null,
+        role: newUserRole,
+      }),
+    });
+
+    const json = await res.json().catch(() => ({} as any));
+
+    setBusy(false);
+
+    if (!res.ok) {
+      setMsg(json?.error || "Falha ao criar usuário.");
+      return;
+    }
+
+    setNewUserEmail("");
+    setNewUserPass("");
+    setNewUserName("");
+    setNewUserRole("viewer");
+    loadAll();
+  }
+
+  const catsIncome = useMemo(() => categories.filter((c) => c.kind === "income"), [categories]);
+  const catsExpense = useMemo(() => categories.filter((c) => c.kind === "expense"), [categories]);
 
   return (
     <AppShell>
@@ -205,9 +233,7 @@ export default function AdminPage() {
         <div className="flex items-end justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold">Admin</h1>
-            <p className={`text-sm ${ui.muted}`}>
-              Gerencie contas, categorias e permissões.
-            </p>
+            <p className={`text-sm ${ui.muted}`}>Gerencie contas, categorias e permissões.</p>
           </div>
         </div>
 
@@ -226,25 +252,13 @@ export default function AdminPage() {
             )}
 
             <div className="mt-6 flex gap-2 flex-wrap">
-              <Button
-                variant={tab === "accounts" ? "primary" : "ghost"}
-                onClick={() => setTab("accounts")}
-                type="button"
-              >
+              <Button variant={tab === "accounts" ? "primary" : "ghost"} onClick={() => setTab("accounts")} type="button">
                 Contas
               </Button>
-              <Button
-                variant={tab === "categories" ? "primary" : "ghost"}
-                onClick={() => setTab("categories")}
-                type="button"
-              >
+              <Button variant={tab === "categories" ? "primary" : "ghost"} onClick={() => setTab("categories")} type="button">
                 Categorias
               </Button>
-              <Button
-                variant={tab === "users" ? "primary" : "ghost"}
-                onClick={() => setTab("users")}
-                type="button"
-              >
+              <Button variant={tab === "users" ? "primary" : "ghost"} onClick={() => setTab("users")} type="button">
                 Usuários
               </Button>
             </div>
@@ -256,17 +270,8 @@ export default function AdminPage() {
                   <div className="font-semibold">Contas</div>
 
                   <div className="flex flex-col sm:flex-row gap-2">
-                    <Input
-                      value={newAccount}
-                      onChange={(e) => setNewAccount(e.target.value)}
-                      placeholder="Nova conta (ex: Caixa)"
-                    />
-                    <Button
-                      variant="primary"
-                      onClick={addAccount}
-                      disabled={busy}
-                      type="button"
-                    >
+                    <Input value={newAccount} onChange={(e) => setNewAccount(e.target.value)} placeholder="Nova conta (ex: Caixa)" />
+                    <Button variant="primary" onClick={addAccount} disabled={busy} type="button">
                       Adicionar
                     </Button>
                   </div>
@@ -274,34 +279,18 @@ export default function AdminPage() {
 
                 <div className="mt-4 space-y-2">
                   {accounts.map((a) => (
-                    <Card
-                      key={a.id}
-                      variant="soft"
-                      className="p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-                    >
+                    <Card key={a.id} variant="soft" className="p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                       <div>
                         <div className="text-sm font-medium">{a.name}</div>
-                        <div className={`text-xs ${ui.muted}`}>
-                          {a.active ? "Ativa" : "Inativa"}
-                        </div>
+                        <div className={`text-xs ${ui.muted}`}>{a.active ? "Ativa" : "Inativa"}</div>
                       </div>
 
                       <div className="flex gap-2 flex-wrap">
-                        <Button
-                          variant="ghost"
-                          onClick={() => toggleAccount(a)}
-                          disabled={busy}
-                          type="button"
-                        >
+                        <Button variant="ghost" onClick={() => toggleAccount(a)} disabled={busy} type="button">
                           {a.active ? "Desativar" : "Ativar"}
                         </Button>
 
-                        <Button
-                          variant="danger"
-                          onClick={() => deleteAccount(a)}
-                          disabled={busy}
-                          type="button"
-                        >
+                        <Button variant="danger" onClick={() => deleteAccount(a)} disabled={busy} type="button">
                           Excluir
                         </Button>
                       </div>
@@ -318,28 +307,14 @@ export default function AdminPage() {
                   <div className="font-semibold">Categorias</div>
 
                   <div className="flex flex-col sm:flex-row gap-2">
-                    <Select
-                      value={newCatKind}
-                      onChange={(e) =>
-                        setNewCatKind(e.target.value as "income" | "expense")
-                      }
-                    >
+                    <Select value={newCatKind} onChange={(e) => setNewCatKind(e.target.value as "income" | "expense")}>
                       <option value="income">Entrada</option>
                       <option value="expense">Saída</option>
                     </Select>
 
-                    <Input
-                      value={newCatName}
-                      onChange={(e) => setNewCatName(e.target.value)}
-                      placeholder="Nova categoria"
-                    />
+                    <Input value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Nova categoria" />
 
-                    <Button
-                      variant="primary"
-                      onClick={addCategory}
-                      disabled={busy}
-                      type="button"
-                    >
+                    <Button variant="primary" onClick={addCategory} disabled={busy} type="button">
                       Adicionar
                     </Button>
                   </div>
@@ -350,34 +325,18 @@ export default function AdminPage() {
                     <div className="font-semibold mb-2">Entradas</div>
                     <div className="space-y-2">
                       {catsIncome.map((c) => (
-                        <Card
-                          key={c.id}
-                          variant="soft"
-                          className="p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-                        >
+                        <Card key={c.id} variant="soft" className="p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                           <div>
                             <div className="text-sm font-medium">{c.name}</div>
-                            <div className={`text-xs ${ui.muted}`}>
-                              {c.active ? "Ativa" : "Inativa"}
-                            </div>
+                            <div className={`text-xs ${ui.muted}`}>{c.active ? "Ativa" : "Inativa"}</div>
                           </div>
 
                           <div className="flex gap-2 flex-wrap">
-                            <Button
-                              variant="ghost"
-                              onClick={() => toggleCategory(c)}
-                              disabled={busy}
-                              type="button"
-                            >
+                            <Button variant="ghost" onClick={() => toggleCategory(c)} disabled={busy} type="button">
                               {c.active ? "Desativar" : "Ativar"}
                             </Button>
 
-                            <Button
-                              variant="danger"
-                              onClick={() => deleteCategory(c)}
-                              disabled={busy}
-                              type="button"
-                            >
+                            <Button variant="danger" onClick={() => deleteCategory(c)} disabled={busy} type="button">
                               Excluir
                             </Button>
                           </div>
@@ -390,34 +349,18 @@ export default function AdminPage() {
                     <div className="font-semibold mb-2">Saídas</div>
                     <div className="space-y-2">
                       {catsExpense.map((c) => (
-                        <Card
-                          key={c.id}
-                          variant="soft"
-                          className="p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-                        >
+                        <Card key={c.id} variant="soft" className="p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                           <div>
                             <div className="text-sm font-medium">{c.name}</div>
-                            <div className={`text-xs ${ui.muted}`}>
-                              {c.active ? "Ativa" : "Inativa"}
-                            </div>
+                            <div className={`text-xs ${ui.muted}`}>{c.active ? "Ativa" : "Inativa"}</div>
                           </div>
 
                           <div className="flex gap-2 flex-wrap">
-                            <Button
-                              variant="ghost"
-                              onClick={() => toggleCategory(c)}
-                              disabled={busy}
-                              type="button"
-                            >
+                            <Button variant="ghost" onClick={() => toggleCategory(c)} disabled={busy} type="button">
                               {c.active ? "Desativar" : "Ativar"}
                             </Button>
 
-                            <Button
-                              variant="danger"
-                              onClick={() => deleteCategory(c)}
-                              disabled={busy}
-                              type="button"
-                            >
+                            <Button variant="danger" onClick={() => deleteCategory(c)} disabled={busy} type="button">
                               Excluir
                             </Button>
                           </div>
@@ -428,9 +371,7 @@ export default function AdminPage() {
                 </div>
 
                 <p className={`mt-4 ${ui.hint}`}>
-                  Dica: se uma categoria estiver em uso em algum lançamento, o
-                  banco vai bloquear a exclusão. Nesse caso, use{" "}
-                  <b>Desativar</b>.
+                  Dica: se uma categoria estiver em uso em algum lançamento, o banco vai bloquear a exclusão. Nesse caso, use <b>Desativar</b>.
                 </p>
               </Card>
             )}
@@ -440,41 +381,75 @@ export default function AdminPage() {
               <Card className="mt-4 p-4">
                 <div className="font-semibold">Usuários</div>
                 <div className={`text-sm mt-1 ${ui.muted}`}>
-                  Aqui você promove/rebaixa permissões com base no cadastro em{" "}
-                  <b>profiles</b>.
+                  Agora você pode <b>criar usuários</b> e também promover/rebaixar permissões.
                 </div>
 
+                {/* ✅ Criar usuário */}
+                <Card variant="soft" className="mt-4 p-3">
+                  <div className="font-semibold text-sm">Criar novo usuário</div>
+
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-sm">Nome (opcional)</label>
+                      <Input value={newUserName} onChange={(e) => setNewUserName(e.target.value)} className="mt-1" placeholder="Ex: João Silva" />
+                    </div>
+
+                    <div>
+                      <label className="text-sm">Permissão</label>
+                      <Select value={newUserRole} onChange={(e) => setNewUserRole(e.target.value as any)} className="mt-1">
+                        <option value="viewer">Viewer</option>
+                        <option value="admin">Admin</option>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <label className="text-sm">E-mail</label>
+                      <Input value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} className="mt-1" type="email" placeholder="email@dominio.com" />
+                    </div>
+
+                    <div>
+                      <label className="text-sm">Senha</label>
+                      <Input value={newUserPass} onChange={(e) => setNewUserPass(e.target.value)} className="mt-1" type="text" placeholder="mínimo 6 caracteres" />
+                      <div className={`mt-1 ${ui.hint}`}>Dica: você pode definir uma senha temporária e depois a pessoa troca.</div>
+                    </div>
+
+                    <div className="md:col-span-2 flex gap-2">
+                      <Button variant="primary" onClick={createUser} disabled={busy} type="button">
+                        {busy ? "Criando…" : "Criar usuário"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setNewUserEmail("");
+                          setNewUserPass("");
+                          setNewUserName("");
+                          setNewUserRole("viewer");
+                        }}
+                      >
+                        Limpar
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+
+                {/* Lista de usuários */}
                 <div className="mt-4 space-y-2">
                   {profiles.map((p) => (
-                    <Card
-                      key={p.user_id}
-                      variant="soft"
-                      className="p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-                    >
+                    <Card key={p.user_id} variant="soft" className="p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="text-sm font-medium truncate">
-                          {p.full_name || "(sem nome)"}
-                        </div>
+                        <div className="text-sm font-medium truncate">{p.full_name || "(sem nome)"}</div>
                         <div className={`text-xs ${ui.muted} truncate`}>
                           {p.user_id} • {p.role.toUpperCase()}
                         </div>
                       </div>
 
                       <div className="flex gap-2 flex-wrap">
-                        <Button
-                          variant="ghost"
-                          onClick={() => setUserRole(p, "viewer")}
-                          disabled={busy}
-                          type="button"
-                        >
+                        <Button variant="ghost" onClick={() => setUserRole(p, "viewer")} disabled={busy} type="button">
                           Viewer
                         </Button>
-                        <Button
-                          variant="primary"
-                          onClick={() => setUserRole(p, "admin")}
-                          disabled={busy}
-                          type="button"
-                        >
+                        <Button variant="primary" onClick={() => setUserRole(p, "admin")} disabled={busy} type="button">
                           Admin
                         </Button>
                       </div>

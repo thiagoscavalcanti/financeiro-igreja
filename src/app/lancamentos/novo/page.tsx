@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useIsAdmin } from "@/lib/useIsAdmin";
 import AppShell from "@/components/AppShell";
 import { supabase } from "@/lib/supabaseClient";
 import type { Account, Category, TxKind } from "@/lib/types";
+import { todayLocalISO } from "@/lib/dates";
 
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
@@ -18,10 +20,37 @@ function fmtBRL(v: number) {
 
 function addMonthsKeepDay(isoDate: string, months: number) {
   const [y, m, d] = isoDate.split("-").map(Number);
-  const base = new Date(y, m - 1, d);
-  const target = new Date(base);
+  const target = new Date(y, m - 1, d);
   target.setMonth(target.getMonth() + months);
-  return target.toISOString().slice(0, 10);
+
+  const yy = target.getFullYear();
+  const mm = String(target.getMonth() + 1).padStart(2, "0");
+  const dd = String(target.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+function monthRangeISO(isoDate: string) {
+  const [y, m] = isoDate.split("-").map(Number);
+  const start = new Date(y, m - 1, 1);
+  const end = new Date(y, m, 1); // 1º dia do mês seguinte
+
+  const startISO = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(
+    start.getDate()
+  ).padStart(2, "0")}`;
+
+  const endISO = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(
+    end.getDate()
+  ).padStart(2, "0")}`;
+
+  return { startISO, endISO };
+}
+
+function pad3(n: number) {
+  return String(n).padStart(3, "0");
+}
+
+function onlyDigits(s: string) {
+  return (s || "").replace(/\D/g, "");
 }
 
 export default function NovoLancamentoPage() {
@@ -34,7 +63,7 @@ export default function NovoLancamentoPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
 
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayLocalISO());
   const [kind, setKind] = useState<TxKind>("income");
   const [categoryId, setCategoryId] = useState("");
   const [accountId, setAccountId] = useState("");
@@ -50,6 +79,11 @@ export default function NovoLancamentoPage() {
   const [recMonths, setRecMonths] = useState<number>(3);
 
   const [file, setFile] = useState<File | null>(null);
+
+  // ✅ NOVO: Nº do documento (somente para Saída)
+  const [expenseDocNo, setExpenseDocNo] = useState<string>("");
+  const [expenseDocAuto, setExpenseDocAuto] = useState(true); // se usuário editar, vira false
+  const lastDocMonthRef = useRef<string>(""); // YYYY-MM
 
   const filteredCategories = useMemo(
     () => categories.filter((c) => c.kind === kind),
@@ -100,8 +134,63 @@ export default function NovoLancamentoPage() {
       setExpenseStatus("executed");
       setIsRecurring(false);
       setFile(null);
+
+      // limpa doc quando volta pra entrada
+      setExpenseDocNo("");
+      setExpenseDocAuto(true);
+      lastDocMonthRef.current = "";
     }
   }, [kind]);
+
+  // ✅ busca próximo doc do mês (tipo 001, 002…)
+  async function fetchNextExpenseDocNo(isoDate: string) {
+    const { startISO, endISO } = monthRangeISO(isoDate);
+
+    // pega o maior doc_no do mês (apenas despesas)
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("expense_doc_no")
+      .eq("kind", "expense")
+      .gte("date", startISO)
+      .lt("date", endISO)
+      .not("expense_doc_no", "is", null)
+      .order("expense_doc_no", { ascending: false })
+      .limit(1);
+
+    if (error) throw error;
+
+    const last = (data as any)?.[0]?.expense_doc_no as string | null | undefined;
+    const lastNum = last ? Number(onlyDigits(last)) : 0;
+    const nextNum = Number.isFinite(lastNum) ? lastNum + 1 : 1;
+
+    return pad3(nextNum);
+  }
+
+  // ✅ auto-preencher doc quando for Saída e o mês mudar (se estiver em modo "auto")
+  useEffect(() => {
+    async function ensureDoc() {
+      if (kind !== "expense") return;
+
+      const ym = date.slice(0, 7); // YYYY-MM
+      const monthChanged = lastDocMonthRef.current !== ym;
+
+      if (!expenseDocAuto) return; // usuário editou manualmente
+
+      // Se mês mudou ou ainda não tem doc, recalcula
+      if (monthChanged || !expenseDocNo) {
+        try {
+          const next = await fetchNextExpenseDocNo(date);
+          setExpenseDocNo(next);
+          lastDocMonthRef.current = ym;
+        } catch (e: any) {
+          setMsg(e?.message ?? "Falha ao gerar Nº do documento.");
+        }
+      }
+    }
+
+    ensureDoc();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, date, expenseDocAuto]);
 
   function validate() {
     const v = Number(amount);
@@ -113,6 +202,12 @@ export default function NovoLancamentoPage() {
 
     if (file && file.size > 5 * 1024 * 1024) {
       return "Arquivo muito grande. Limite: 5MB.";
+    }
+
+    if (kind === "expense") {
+      if (!expenseDocNo.trim()) return "Informe o Nº do documento.";
+      // opcional: limitar a 3 dígitos
+      if (onlyDigits(expenseDocNo).length > 6) return "Nº do documento inválido.";
     }
 
     if (kind === "expense" && isRecurring) {
@@ -163,14 +258,41 @@ export default function NovoLancamentoPage() {
         created_by: user.id,
         expense_status: null,
         executed_at: null,
+        expense_doc_no: null,
       });
     } else {
       const status = expenseStatus;
       const execAt = status === "executed" ? new Date().toISOString() : null;
       const total = isRecurring ? recMonths : 1;
 
+      // ✅ Para recorrência: precisamos gerar doc_no por mês
+      //    Vamos cachear por mês para evitar múltiplas queries se repetisse o mesmo mês.
+      const monthNextMap = new Map<string, number>();
+
+      // Primeiro mês usa o valor do formulário (editável)
+      const firstDocDigits = Number(onlyDigits(expenseDocNo)) || 1;
+
       for (let i = 0; i < total; i++) {
         const d = addMonthsKeepDay(date, i);
+        const ym = d.slice(0, 7);
+
+        let docNoForThisRow: string;
+
+        if (i === 0) {
+          docNoForThisRow = pad3(firstDocDigits);
+        } else {
+          // gera o próximo para o mês de "d"
+          if (!monthNextMap.has(ym)) {
+            // busca o próximo do mês e guarda como "próximo número disponível"
+            const nextStr = await fetchNextExpenseDocNo(d);
+            monthNextMap.set(ym, Number(onlyDigits(nextStr)) || 1);
+          }
+
+          const n = monthNextMap.get(ym)!;
+          docNoForThisRow = pad3(n);
+          monthNextMap.set(ym, n + 1);
+        }
+
         rows.push({
           date: d,
           kind,
@@ -184,6 +306,7 @@ export default function NovoLancamentoPage() {
           created_by: user.id,
           expense_status: status,
           executed_at: execAt,
+          expense_doc_no: docNoForThisRow,
         });
       }
     }
@@ -322,6 +445,55 @@ export default function NovoLancamentoPage() {
                   ))}
                 </select>
               </div>
+
+              {/* ✅ NOVO: Nº do Documento (apenas Saída) */}
+              {kind === "expense" && (
+                <div>
+                  <label className="text-sm">
+                    Nº do documento <span className={ui.hint}>(zera todo mês)</span>
+                  </label>
+                  <Input
+                    value={expenseDocNo}
+                    onChange={(e) => {
+                      setExpenseDocNo(e.target.value);
+                      setExpenseDocAuto(false); // usuário assumiu controle
+                    }}
+                    onBlur={() => {
+                      // normaliza pra 3 dígitos se for número
+                      const n = Number(onlyDigits(expenseDocNo));
+                      if (Number.isFinite(n) && n > 0) setExpenseDocNo(pad3(n));
+                    }}
+                    placeholder="001"
+                    inputMode="numeric"
+                    required
+                  />
+                  <div className={`mt-1 ${ui.hint}`}>
+                    {expenseDocAuto ? "Automático (pode editar)" : "Editado manualmente"}
+                    {expenseDocAuto === false && (
+                      <>
+                        {" "}
+                        ·{" "}
+                        <button
+                          type="button"
+                          className="underline"
+                          onClick={async () => {
+                            try {
+                              setExpenseDocAuto(true);
+                              const next = await fetchNextExpenseDocNo(date);
+                              setExpenseDocNo(next);
+                              lastDocMonthRef.current = date.slice(0, 7);
+                            } catch (e: any) {
+                              setMsg(e?.message ?? "Falha ao gerar Nº do documento.");
+                            }
+                          }}
+                        >
+                          voltar para automático
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="md:col-span-2">
                 <label className="text-sm">Descrição</label>

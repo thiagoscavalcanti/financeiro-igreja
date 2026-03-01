@@ -22,7 +22,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { isAdmin } = useIsAdmin();
 
-  const [themeMode, setThemeMode] = useState<ThemeMode>("system");
+  const [themeMode, setThemeMode] = useState<ThemeMode>("dark"); // default escuro
 
   function applyTheme(mode: ThemeMode) {
     const root = document.documentElement;
@@ -33,14 +33,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     try {
-      const saved = (localStorage.getItem(THEME_KEY) as ThemeMode) || "system";
+      const saved = (localStorage.getItem(THEME_KEY) as ThemeMode) || "dark";
       const mode: ThemeMode =
-        saved === "light" || saved === "dark" || saved === "system" ? saved : "system";
+        saved === "light" || saved === "dark" || saved === "system"
+          ? saved
+          : "dark";
+
       setThemeMode(mode);
       applyTheme(mode);
+
+      if (!localStorage.getItem(THEME_KEY)) {
+        localStorage.setItem(THEME_KEY, mode);
+      }
     } catch {
-      setThemeMode("system");
-      applyTheme("system");
+      setThemeMode("dark");
+      applyTheme("dark");
     }
 
     const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
@@ -130,19 +137,31 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b border-slate-200 dark:bg-slate-950/80 dark:border-slate-800">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <div className="font-semibold">Financeiro Igreja</div>
-            <span className={ui.hint}>MVP</span>
-          </div>
+          {/* Branding (cruz sutil + IPRA) */}
+          <Link href="/" className="flex items-center gap-3">
+            <div className="h-8 w-8 rounded-lg bg-slate-900 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+              <div className="relative w-4 h-4">
+                {/* Cruz vertical */}
+                <div className="absolute left-1/2 top-0 -translate-x-1/2 w-[2px] h-full bg-white dark:bg-slate-200 rounded-sm" />
+                {/* Cruz horizontal (um pouco acima do meio) */}
+                <div className="absolute top-1/3 left-0 w-full h-[2px] bg-white dark:bg-slate-200 rounded-sm" />
+              </div>
+            </div>
+
+            <div className="leading-tight">
+              <div className="font-semibold tracking-wide">IPRA</div>
+              <div className={`text-xs ${ui.muted}`}>Tesouraria</div>
+            </div>
+          </Link>
 
           <nav className="flex items-center gap-2 flex-wrap">
             <NavLink href="/" label="Início" />
             <NavLink href="/lancamentos" label="Lançamentos" />
-            <NavLink href="/lancamentos/novo" label="Novo" />
+            {isAdmin && <NavLink href="/lancamentos/novo" label="Novo" />}
             <NavLink href="/relatorios" label="Relatórios" />
             {isAdmin && <NavLink href="/admin" label="Admin" />}
 
-            {/* Tema (segmentado) */}
+            {/* Tema */}
             <div
               className={[
                 "flex items-center gap-1 p-1 rounded-xl border",
